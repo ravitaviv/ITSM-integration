@@ -6,12 +6,16 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "build:pages": "node scripts/build-pages.js"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
     "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
   }
 }
