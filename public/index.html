@@ -1,0 +1,830 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Incident-Justified Agent Access</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: a scenario switcher above three lanes read left to right: what ITSM says, what Warden checks, what happens.
+   Below them, the audit log as the broker recorded it. Every value on the page comes from the mock API. */
+:root {
+  --bg: #f2f5f7;
+  --surface: #ffffff;
+  --ink: #14202b;
+  --muted: #566573;
+  --line: #d8dfe6;
+  --accent: #0a6b70;
+  --accent-soft: #e1f1f1;
+  --good: #1d7a4b;
+  --good-soft: #e3f3ea;
+  --bad: #b3261e;
+  --bad-soft: #fbe9e7;
+  --warn: #8f5a00;
+  --warn-soft: #fbf0d9;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1419;
+    --surface: #161d25;
+    --ink: #e5ebf0;
+    --muted: #91a0af;
+    --line: #2a3541;
+    --accent: #4fc3c7;
+    --accent-soft: #143234;
+    --good: #57c48c;
+    --good-soft: #14301f;
+    --bad: #ff8b82;
+    --bad-soft: #3a1a18;
+    --warn: #e2a95a;
+    --warn-soft: #34270f;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1419;
+  --surface: #161d25;
+  --ink: #e5ebf0;
+  --muted: #91a0af;
+  --line: #2a3541;
+  --accent: #4fc3c7;
+  --accent-soft: #143234;
+  --good: #57c48c;
+  --good-soft: #14301f;
+  --bad: #ff8b82;
+  --bad-soft: #3a1a18;
+  --warn: #e2a95a;
+  --warn-soft: #34270f;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  padding-inline: 16px;
+  padding-block: 24px 40px;
+}
+.wrap { max-width: 1120px; margin: 0 auto; }
+.top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+h1 { font-size: 22px; line-height: 1.25; margin: 0 0 4px; font-weight: 600; text-wrap: balance; }
+.sub { color: var(--muted); margin: 0 0 20px; max-width: 70ch; }
+.mock-tag {
+  display: inline-block; font-family: var(--mono); font-size: 11px; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--warn); background: var(--warn-soft);
+  padding: 2px 8px; border-radius: 4px; margin-bottom: 10px;
+}
+.theme {
+  font: inherit; font-size: 12px; color: var(--muted); background: transparent;
+  border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; cursor: pointer; white-space: nowrap;
+}
+.theme:hover { border-color: var(--accent); color: var(--ink); }
+.tools { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+/* API call annotations: who called what (real path), the status, and the real request and response bodies. */
+.api { margin-top: 4px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; }
+.api summary, div.api { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.api summary { cursor: pointer; list-style: none; }
+.api summary::-webkit-details-marker { display: none; }
+.api summary::before { content: "▸"; color: var(--muted); width: 10px; flex: none; }
+.api[open] > summary::before { content: "▾"; }
+.api .who { font-family: var(--sans); font-size: 11px; font-weight: 500; color: var(--accent); background: var(--accent-soft); border-radius: 4px; padding: 0 6px; white-space: nowrap; }
+.api .route { color: var(--ink); }
+.api .rpc { color: var(--accent); }
+.api.cap { margin-top: 10px; font-family: var(--sans); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+.api .st { font-weight: 600; }
+.api .st.ok { color: var(--good); }
+.api .st.bad { color: var(--bad); }
+.api .tpl { margin: 4px 0 0 18px; font-size: 11px; }
+.api .lbl { margin: 6px 0 2px 18px; font-family: var(--sans); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+.api pre { margin: 0 0 0 18px; padding: 8px 10px; max-height: 190px; overflow: auto; white-space: pre; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; }
+body.hide-api .api { display: none; }
+#checkapi:not(:empty) { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+#checkapi .api:first-child { margin-top: 0; }
+.card h3 + .api { margin: -4px 0 10px; }
+.audit h2 + .api { margin: -4px 0 8px; }
+.picker { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.picker button {
+  font: inherit; font-weight: 500; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; cursor: pointer;
+}
+.picker button:hover:not(:disabled) { border-color: var(--accent); }
+.picker button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.picker button:disabled { cursor: default; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 16px; }
+.bar .blurb { flex: 1 1 320px; min-width: 0; color: var(--muted); }
+.play, .kill {
+  font: inherit; font-weight: 600; background: transparent;
+  border-radius: 6px; padding: 8px 14px; cursor: pointer;
+}
+.play { color: var(--accent); border: 1px solid var(--accent); }
+.kill { color: var(--bad); border: 1px solid var(--bad); }
+.play:disabled, .kill:disabled { opacity: .5; cursor: default; }
+.lanes { display: grid; grid-template-columns: 1fr; gap: 16px; }
+@media (min-width: 900px) { .lanes { grid-template-columns: 0.9fr 1.05fr 1.25fr; } }
+.lane { min-width: 0; }
+.lane h2, .audit h2 {
+  font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+  margin: 0 0 8px; font-weight: 600;
+}
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-bottom: 12px; min-width: 0; }
+.card h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; }
+dt { color: var(--muted); }
+dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+dd.changed { color: var(--warn); font-weight: 600; }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+.call { font-family: var(--mono); font-size: 12.5px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px; overflow-x: auto; white-space: pre; }
+.checks { list-style: none; margin: 0; padding: 0; }
+.checks li { display: grid; grid-template-columns: 22px 1fr; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); }
+.checks li:first-child { border-top: 0; padding-top: 0; }
+.checks li:last-child { padding-bottom: 0; }
+.dot { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; line-height: 1; border: 1.5px solid var(--line); color: var(--muted); }
+.st-pass .dot { background: var(--good-soft); border-color: var(--good); color: var(--good); }
+.st-fail .dot { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
+.st-skip .dot { border-style: dashed; }
+.st-wait, .st-skip { color: var(--muted); }
+.checks .label { font-weight: 500; }
+.checks .detail { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.st-fail .detail { color: var(--bad); }
+.banner { border-radius: 8px; padding: 14px; margin-bottom: 12px; border: 1px solid var(--line); background: var(--surface); }
+.banner.granted { background: var(--good-soft); border-color: var(--good); }
+.banner.denied, .banner.revoked, .banner.refused { background: var(--bad-soft); border-color: var(--bad); }
+.banner.idle { color: var(--muted); }
+.banner .title { font-weight: 600; font-size: 15px; }
+.banner.granted .title { color: var(--good); }
+.banner.denied .title, .banner.revoked .title, .banner.refused .title { color: var(--bad); }
+.banner .code { font-family: var(--mono); font-size: 12px; margin-top: 4px; }
+.banner p { margin: 6px 0 0; }
+.log { list-style: none; margin: 0; padding: 0; }
+.log li { display: grid; grid-template-columns: 64px 1fr; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); }
+.log li:first-child { border-top: 0; padding-top: 0; }
+.log .t { font-family: var(--mono); font-size: 12px; color: var(--muted); padding-top: 2px; }
+.log .txt { min-width: 0; overflow-wrap: anywhere; }
+.log .q { font-family: var(--mono); font-size: 12.5px; }
+.log .res { color: var(--muted); font-size: 13px; }
+.log .res.bad { color: var(--bad); }
+.log .tag { font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); font-weight: 600; margin-right: 6px; }
+.note { background: var(--accent-soft); border-radius: 8px; padding: 12px 14px; }
+.note b { font-weight: 600; }
+.wn { font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* READ and WRITE labels: on the timeline and in the audit log. */
+.kind { display: inline-block; font-family: var(--mono); font-size: 10.5px; font-weight: 600; letter-spacing: .05em; padding: 0 6px; border-radius: 4px; margin-right: 6px; vertical-align: 1px; }
+.kind.read { color: var(--accent); background: var(--accent-soft); }
+.kind.write { color: var(--warn); background: var(--warn-soft); outline: 1px solid var(--warn); }
+/* Work notes inside the incident panel. */
+.notes { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.notes h4 { margin: 0 0 6px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.notes .nt { padding: 8px 0; border-top: 1px solid var(--line); }
+.notes .nt:first-of-type { border-top: 0; padding-top: 0; }
+.notes .nh { color: var(--muted); font-size: 12px; margin-bottom: 2px; }
+.notes .none { color: var(--muted); }
+/* The mock table, before and after a write. */
+table.db { font-size: 12.5px; }
+table.db th, table.db td { padding: 4px 8px; }
+table.db th { border-top: 0; color: var(--muted); font-size: 11.5px; }
+table.db td { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+table.db td:first-child { white-space: nowrap; }
+table.db td.changed { color: var(--warn); background: var(--warn-soft); font-weight: 600; }
+table.db tr.gone td { color: var(--bad); background: var(--bad-soft); text-decoration: line-through; }
+table.db tr.new td { color: var(--good); background: var(--good-soft); }
+.dbcap { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
+.dbcap b { font-weight: 600; color: var(--ink); }
+.call2cap { margin: 10px 0 6px; color: var(--muted); font-size: 12px; letter-spacing: .04em; text-transform: uppercase; font-weight: 600; }
+.audit { margin-top: 4px; }
+.audit .card { padding: 0; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 7px 12px; border-top: 1px solid var(--line); vertical-align: top; }
+thead th { border-top: 0; color: var(--muted); font-weight: 600; font-size: 12px; white-space: nowrap; }
+td.m { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+td.d { min-width: 220px; overflow-wrap: anywhere; }
+td.empty { color: var(--muted); }
+footer { margin-top: 24px; color: var(--muted); font-size: 12.5px; max-width: 80ch; }
+@media (prefers-reduced-motion: no-preference) {
+  .reveal { animation: rise .5s ease-out; }
+  @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="top">
+    <span class="mock-tag">Illustrative mock</span>
+    <div class="tools">
+      <button class="theme" id="apitoggle" type="button" title="Cycle how API calls are shown">API calls: with data</button>
+      <button class="theme" id="theme" type="button" aria-label="Color theme">Theme: dark</button>
+    </div>
+  </div>
+  <h1>Incident-justified access for an ITSM AI agent</h1>
+  <p class="sub">An agent asks for PostgreSQL access to fix an incident. Warden checks the incident before it issues anything, then logs, watches and revokes. The agent talks to Warden over MCP. Pick a case to run it against the mock ITSM and Warden, or play it step by step.</p>
+
+  <div class="picker" id="picker" role="group" aria-label="Scenario"></div>
+  <div class="bar">
+    <div class="blurb" id="blurb"></div>
+    <button class="play" id="play" type="button">Play step by step</button>
+    <button class="kill" id="kill" type="button">Suspend agent</button>
+  </div>
+
+  <div class="lanes">
+    <section class="lane" aria-label="ITSM">
+      <h2>ITSM says</h2>
+      <div class="card" id="incident"></div>
+      <div class="card" id="dbcard" hidden></div>
+      <div class="card">
+        <h3>Agent tool call</h3>
+        <div class="call" id="call"></div>
+        <div class="call2cap" id="call2cap" hidden>Then the write</div>
+        <div class="call" id="call2" hidden></div>
+        <div id="toolapi"></div>
+        <div id="connectapi"></div>
+      </div>
+    </section>
+    <section class="lane" aria-label="Warden checks">
+      <h2>Warden checks</h2>
+      <div class="card"><ul class="checks" id="checks"></ul><div id="checkapi"></div></div>
+    </section>
+    <section class="lane" aria-label="Outcome">
+      <h2>What happens</h2>
+      <div id="banner" aria-live="polite"></div>
+      <div class="card"><ul class="log" id="log"></ul></div>
+    </section>
+  </div>
+
+  <section class="audit" aria-label="Audit log">
+    <h2>Warden audit log</h2>
+    <div class="api"><span class="route">GET /warden/audit</span></div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Time</th><th>Event</th><th>Kind</th><th>Agent</th><th>Incident</th><th>Detail</th></tr></thead>
+        <tbody id="audit"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="note" id="proves" style="margin-top:4px"></div>
+
+  <footer>Made for practice. Incident data, timings and policy values are invented, and no real ITSM or access-management system is involved.</footer>
+</div>
+
+<script>
+(function () {
+  const AGENT = "IT Ops Agent";
+  const DATABASE = "orders-prod";
+  const STEP_MS = 2000; // pause between steps in "Play step by step"
+  const MCP = "/mcp/postgres"; // the gateway URL the agent is configured with
+  // The OAuth client the agent is registered with at the identity provider. Demo-only values.
+  const CLIENT = { client_id: "it-ops-agent", client_secret: "demo-secret-it-ops" };
+  const SQL_COUNT = "SELECT count(*) FROM orders WHERE status = 'pending';";
+  const SQL_ACTIVITY = "SELECT pid, state, wait_event FROM pg_stat_activity;";
+  const SQL_STUCK = "SELECT * FROM orders WHERE status = 'stuck';";
+  const SQL_FIX = "UPDATE orders SET status='processing' WHERE status='stuck'";
+  const SQL_PAYMENTS = "UPDATE payments SET status = 'captured' WHERE status = 'pending'";
+  const SQL_DELETE_ALL = "DELETE FROM orders";
+  const SQL_DROP = "DROP TABLE orders";
+
+  // What each button does, in order. The incident, the checks, the outcome and the audit rows all come back from the API.
+  // Steps: query (the agent calls run_query; the first one is also the access request), end (the agent closes its
+  // MCP session), resolve (a human resolves the incident), suspend (security admin).
+  const SCEN = [
+    {
+      name: "Valid incident",
+      blurb: "P1 incident assigned to the agent's group, on the right database.",
+      incident: "INC0012345",
+      steps: [{ do: "query", sql: SQL_COUNT }, { do: "query", sql: SQL_ACTIVITY }, { do: "end" }],
+      note: "Every query is logged with the agent, its owner and INC0012345.",
+      proves: "Access exists only for the length of the work, and the record ends up on the incident."
+    },
+    {
+      name: "Wrong assignee",
+      blurb: "The incident belongs to a human on another team, not to the agent.",
+      incident: "INC0012346",
+      steps: [{ do: "query", sql: SQL_COUNT }],
+      note: "The agent cannot borrow a ticket that belongs to someone else.",
+      proves: "A ticket number alone is not enough. The agent has to be the one the incident is assigned to."
+    },
+    {
+      name: "Wrong database",
+      blurb: "The incident is about the payments database; the agent asks for orders.",
+      incident: "INC0012347",
+      steps: [{ do: "query", sql: SQL_COUNT }],
+      note: "This check is new for agents. Human requests did not need it.",
+      proves: "The incident justifies access to the systems it is about, not to any production database."
+    },
+    {
+      name: "Resolved mid-session",
+      blurb: "A human resolves the incident while the agent is still working.",
+      incident: "INC0012345",
+      steps: [{ do: "query", sql: SQL_COUNT }, { do: "resolve" }, { do: "query", sql: SQL_ACTIVITY }],
+      note: "The reason for access disappeared, so the access did too.",
+      proves: "Access is tied to a live reason. The check repeats during the session, not only at the start."
+    },
+    {
+      name: "Kill switch",
+      blurb: "A security admin suspends the agent from Warden's console.",
+      incident: "INC0012345",
+      steps: [{ do: "query", sql: SQL_COUNT }, { do: "suspend" }, { do: "query", sql: SQL_ACTIVITY }],
+      note: "Works even when the incident is still open.",
+      proves: "Security keeps a way to stop an agent immediately, independent of the ticket."
+    },
+    // Narrowly scoped writes. INC0012349 may UPDATE the orders table and nothing else. Each case reads first, so the
+    // session is open when the write is judged; `table` is the mock table shown before and after, `keySql` the write.
+    {
+      name: "Fix stuck orders",
+      blurb: "The incident allows one narrow write: UPDATE on the orders table.",
+      incident: "INC0012349", table: "orders", keySql: SQL_FIX,
+      steps: [{ do: "query", sql: SQL_STUCK }, { do: "query", sql: SQL_FIX }, { do: "query", sql: SQL_STUCK }, { do: "end" }],
+      note: "Only UPDATE on orders is in scope for INC0012349.",
+      proves: "A write can be allowed without handing over the database: this incident gets one table and one statement type."
+    },
+    {
+      name: "Out-of-scope write",
+      blurb: "Same incident, but the agent tries to update the payments table.",
+      incident: "INC0012349", table: "payments", keySql: SQL_PAYMENTS,
+      steps: [{ do: "query", sql: SQL_STUCK }, { do: "query", sql: SQL_PAYMENTS }, { do: "end" }],
+      note: "payments is not on the incident's writable list.",
+      proves: "The incident justifies changing the orders it is about, not every table in the database."
+    },
+    {
+      name: "Dangerous write",
+      blurb: "The agent runs DELETE FROM orders with no WHERE clause.",
+      incident: "INC0012349", table: "orders", keySql: SQL_DELETE_ALL,
+      steps: [{ do: "query", sql: SQL_STUCK }, { do: "query", sql: SQL_DELETE_ALL }, { do: "end" }],
+      note: "An UPDATE or DELETE with no WHERE clause is refused before it can touch a row.",
+      proves: "Even an in-scope table is protected from the mistake that would hit every row."
+    },
+    {
+      name: "DROP TABLE orders",
+      blurb: "The agent tries to drop the table. Some statements are never allowed.",
+      incident: "INC0012349", table: "orders", keySql: SQL_DROP,
+      steps: [{ do: "query", sql: SQL_STUCK }, { do: "query", sql: SQL_DROP }, { do: "end" }],
+      note: "DROP, ALTER, TRUNCATE, GRANT, REVOKE, CREATE and cross-database statements are always refused.",
+      proves: "No incident, however urgent, can authorize a change to the schema or the permissions."
+    }
+  ];
+
+  const ENDINGS = {
+    task_complete: { kind: "granted", title: "Access granted, revoked on task end" },
+    incident_not_open: { kind: "revoked", title: "Revoked when the incident closed" },
+    kill_switch: { kind: "revoked", title: "Revoked by the kill switch" }
+  };
+
+  let cur = 0, trace = null, shown = 0, total = 0, timer = null;
+  let running = false, suspended = false, apiMode = "data";
+  const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const hhmmss = (d) => new Date(d).toLocaleTimeString([], { hour12: false });
+
+  // ---- API ----------------------------------------------------------------
+
+  // `route` is the endpoint as documented (with :params) and is what the page shows next to each action.
+  // opts.headers are extra request headers (shown on the page); opts.rpc labels a JSON-RPC call, since every MCP call
+  // goes to the same URL.
+  async function api(method, path, body, route, opts) {
+    opts = opts || {};
+    const res = await fetch(path, {
+      method,
+      headers: Object.assign(body ? { "content-type": "application/json" } : {}, opts.headers),
+      body: body ? JSON.stringify(body) : undefined
+    });
+    let data = null;
+    try { data = await res.json(); } catch (e) { /* empty body */ }
+    return {
+      status: res.status, data, sessionId: res.headers.get("mcp-session-id"),
+      call: { method: method, route: route || path, path: path, rpc: opts.rpc, headers: opts.headers, status: res.status, request: body, response: data }
+    };
+  }
+
+  // One MCP JSON-RPC call to the gateway. Without an id it is a notification (the gateway answers 202 with no body).
+  async function mcp(t, method, params, opts) {
+    opts = opts || {};
+    const body = { jsonrpc: "2.0", method: method };
+    if (!opts.notification) body.id = t.rpcId++;
+    if (params) body.params = params;
+    const headers = { authorization: "Bearer " + t.token };
+    if (t.mcpSession) headers["mcp-session-id"] = t.mcpSession;
+    return api("POST", MCP, body, "/mcp/:serverName", { headers: headers, rpc: opts.rpc || method });
+  }
+
+  const from = (who, call) => Object.assign({ who: who }, call);
+  const isNote = (c) => /work_notes$/.test(c.route);
+
+  // Calls Warden made to ITSM while handling the last request. Those happen server-side, so the page
+  // reads them from the mock ITSM's call log (it tags each call with who sent it).
+  async function brokerCalls(t) {
+    const list = (await api("GET", "/demo/itsm-calls")).data.calls;
+    const fresh = list.slice(t.itsmSeen).filter((c) => c.caller === "warden-broker");
+    t.itsmSeen = list.length;
+    return fresh.map((c) => ({ who: "Warden → ITSM", method: c.method, route: c.route, path: c.path, status: c.status, request: c.request, response: c.response }));
+  }
+
+  async function refreshAudit(t) {
+    t.audit = (await api("GET", "/warden/audit")).data.events;
+    return t.audit.length;
+  }
+
+  // Adds a line to the timeline and remembers how much of the audit log existed at that point,
+  // so step-by-step playback shows the audit table growing in step with the timeline.
+  async function log(t, k, x, extra) {
+    const ev = Object.assign({ t: hhmmss(Date.now()), k: k, x: x }, extra);
+    ev.auditN = await refreshAudit(t);
+    t.events.push(ev);
+  }
+
+  // Warden writes to the incident's work notes: one per write attempt, and a summary when a session ends. Show each new
+  // note once, straight from ITSM. `calls` are the Warden -> ITSM work-note writes behind the action, in order.
+  async function noteEvent(t, calls) {
+    const inc = (await api("GET", "/itsm/incidents/" + t.sc.incident)).data.result;
+    for (let n = 0; t.notes < inc.work_notes.length; n++) {
+      const note = inc.work_notes[t.notes++];
+      const isWrite = /^Warden write attempt/.test(note.text);
+      await log(t, "ITSM", (isWrite ? "Write recorded on " : "Summary added to ") + inc.number + ".", { wn: note.text, author: note.author, calls: calls && calls[n] ? [calls[n]] : undefined });
+    }
+  }
+
+  async function tableRows(name) {
+    const r = await api("GET", "/demo/db/" + DATABASE + "/" + name);
+    return r.data.rows;
+  }
+
+  async function doSuspend(t) {
+    const r = await api("POST", "/warden/agents/" + encodeURIComponent(AGENT) + "/suspend", undefined, "/warden/agents/:agent/suspend");
+    suspended = true;
+    const behind = await brokerCalls(t);
+    await log(t, "Admin", "Security admin suspends " + AGENT + " in Warden.", { calls: [from("Admin → Warden", r.call)] });
+    await log(t, "Warden", r.data.closed_sessions.length + " session(s) closed, database credentials dropped. New access requests from this agent are refused.");
+    if (t.session && r.data.closed_sessions.indexOf(t.session.id) !== -1) t.session.endReason = "kill_switch";
+    await noteEvent(t, behind);
+  }
+
+  const AGENT_TO_GATEWAY = "Agent → Warden gateway";
+
+  // A statement that ran. A write also remembers its result for the outcome banner and marks the timeline line at
+  // which the before/after table switches from "before" to "after".
+  async function queryLogged(t, step, out, calls) {
+    const kind = out.kind.toUpperCase();
+    if (kind === "WRITE") {
+      t.lastWrite = { allowed: true, rows: out.rows_affected };
+      if (t.writeEvent === undefined) t.writeEvent = t.events.length;
+    }
+    await log(t, "Query", "", {
+      tag: "Query logged", kind: kind, q: step.sql, calls: calls.length ? calls : undefined,
+      x: kind === "WRITE" ? out.rows_affected + " row(s) changed" : out.row_count + " row(s) returned"
+    });
+  }
+
+  const STEPS = {
+    async query(t, step) {
+      const r = await mcp(t, "tools/call", { name: "run_query", arguments: { database: DATABASE, sql: step.sql, incident: t.sc.incident } }, { rpc: "tools/call · run_query" });
+      const result = r.data.result;
+      const out = result.structuredContent;
+      const behind = await brokerCalls(t);
+      // A policy refusal is a normal JSON-RPC result with isError set, so the HTTP status is still 200.
+      const call = from(AGENT_TO_GATEWAY, Object.assign({}, r.call, { err: result.isError }));
+      const kind = (out.kind || "read").toUpperCase(); // READ or WRITE, as Warden classified the statement
+
+      if (out.checks) {
+        // The first run_query for this database and incident is the access request: it carries the seven checks.
+        t.checks = out.checks;
+        t.checkCalls = [call].concat(behind.filter((c) => !isNote(c)));
+        t.checksAudit = await refreshAudit(t);
+        if (result.isError) {
+          await log(t, "Warden", "Request refused: " + out.reason + ". No database credential issued, no access session opened.");
+          await log(t, "Warden", "The refusal goes back to the agent as a tool error. It escalates to a human; there is no emergency bypass for agents. Attempt logged with the agent, its owner and " + t.sc.incident + ".");
+          t.outcome = { kind: "denied", title: "Denied", code: out.code, note: t.sc.note };
+          return;
+        }
+        t.session = { id: out.session_id, endReason: null, code: "" };
+        await log(t, "Warden", "Access session " + out.session_id + " opened, expires " + hhmmss(out.expires_at) + ". The broker holds the database credential; the agent only gets query results.");
+        await queryLogged(t, step, out, []);
+        if (kind === "WRITE") await noteEvent(t, behind.filter(isNote));
+        return;
+      }
+
+      if (!result.isError) {
+        await queryLogged(t, step, out, [call].concat(behind.filter((c) => !isNote(c))));
+        if (kind === "WRITE") await noteEvent(t, behind.filter(isNote));
+        return;
+      }
+      if (out.end_reason) { t.session.endReason = out.end_reason; t.session.code = out.code; }
+      // A refused write is recorded for the outcome banner and for the before/after table.
+      if (kind === "WRITE") { t.lastWrite = { allowed: false, code: out.code }; if (t.writeEvent === undefined) t.writeEvent = t.events.length; }
+      await log(t, "Query", "", {
+        tag: "Query blocked", kind: kind, q: step.sql, bad: true, calls: [call].concat(behind.filter((c) => !isNote(c))),
+        x: (kind === "WRITE" ? out.code + " · " : "") + out.reason
+      });
+      await noteEvent(t, behind.filter(isNote));
+    },
+    async end(t) {
+      const r = await api("DELETE", MCP, undefined, "/mcp/:serverName", { headers: { authorization: "Bearer " + t.token, "mcp-session-id": t.mcpSession }, rpc: "session termination" });
+      const behind = await brokerCalls(t);
+      t.session.endReason = "task_complete";
+      await log(t, "Warden", "Agent finished the task and closes its MCP session. Access session ended, database credential dropped.", { calls: [from(AGENT_TO_GATEWAY, r.call)] });
+      await noteEvent(t, behind);
+    },
+    async resolve(t) {
+      const r = await api("POST", "/itsm/incidents/" + t.sc.incident + "/state", { state: "Resolved" }, "/itsm/incidents/:number/state");
+      await log(t, "ITSM", t.sc.incident + " changes to Resolved.", { patch: { state: "Resolved" }, calls: [from("Human → ITSM", r.call)] });
+    },
+    async suspend(t) { await doSuspend(t); }
+  };
+
+  function outcomeOf(t) {
+    const s = t.session;
+    // The banner for a write case is about the write; how the session ended is in the timeline.
+    if (t.lastWrite && t.lastWrite.allowed) return { kind: "granted", title: "Write allowed · " + t.lastWrite.rows + " row(s) changed", code: "", note: t.sc.note };
+    if (t.lastWrite) return { kind: "refused", title: "Write refused", code: t.lastWrite.code, note: t.sc.note };
+    if (!s.endReason) return { kind: "granted", title: "Access granted", code: "", note: "Session in progress." };
+    const ending = ENDINGS[s.endReason] || { kind: "revoked", title: "Session revoked" };
+    return { kind: ending.kind, title: ending.title, code: s.code, note: t.sc.note };
+  }
+
+  // Sets up the incident (fresh seed data), connects the agent (identity provider, then the MCP handshake), then plays
+  // the scenario's steps. Returns a trace to render.
+  async function run(sc) {
+    const t = {
+      sc: sc, incident: null, incidentCall: null, checks: [], checkCalls: [], checksAudit: 0, connect: [], events: [], audit: [],
+      outcome: null, session: null, notes: 0, itsmSeen: 0, rpcId: 1, token: null, mcpSession: null,
+      table: null, lastWrite: null, writeEvent: undefined
+    };
+    await api("POST", "/demo/reset");
+    suspended = false;
+    if (sc.table) t.table = { name: sc.table, before: await tableRows(sc.table), after: null };
+    const got = await api("GET", "/itsm/incidents/" + sc.incident, undefined, "/itsm/incidents/:number");
+    t.incident = got.data.result;
+    t.incidentCall = got.call;
+
+    // 1. The agent gets an access token from its identity provider (OAuth client credentials).
+    const tok = await api("POST", "/idp/token", Object.assign({ grant_type: "client_credentials" }, CLIENT), "/idp/token");
+    t.token = tok.data.access_token;
+    t.connect.push(from("Agent → Identity provider", tok.call));
+    // 2. It opens an MCP session with the Warden gateway, says it is ready, and discovers the tools.
+    const init = await mcp(t, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: AGENT, version: "1.0" } });
+    t.mcpSession = init.sessionId;
+    t.connect.push(from(AGENT_TO_GATEWAY, init.call));
+    t.connect.push(from(AGENT_TO_GATEWAY, (await mcp(t, "notifications/initialized", undefined, { notification: true })).call));
+    t.connect.push(from(AGENT_TO_GATEWAY, (await mcp(t, "tools/list")).call));
+
+    for (const step of sc.steps) await STEPS[step.do](t, step);
+    if (t.table) t.table.after = await tableRows(sc.table);
+    t.outcome = t.outcome || outcomeOf(t);
+    return t;
+  }
+
+  // ---- Controls -----------------------------------------------------------
+
+  function buildPicker() {
+    SCEN.forEach((sc, i) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = sc.name; b.id = "sc" + i;
+      b.addEventListener("click", () => load(i, false));
+      $("picker").appendChild(b);
+    });
+  }
+
+  // Play button: "Play step by step" -> "Pause" while stepping -> "Resume" when stopped part-way.
+  // Suspend agent waits until playback is finished, so it cannot add lines in the middle of a replay.
+  function syncButtons() {
+    const paused = !!trace && !running && !timer && shown < total;
+    Array.prototype.forEach.call($("picker").children, (b) => { b.disabled = running; });
+    $("play").disabled = running;
+    $("play").textContent = timer ? "Pause" : paused ? "Resume" : "Play step by step";
+    $("kill").disabled = running || !trace || suspended || !!timer || paused;
+    $("kill").textContent = suspended ? "Agent suspended" : "Suspend agent";
+  }
+
+  function stop() { if (timer) { clearInterval(timer); timer = null; } }
+
+  function tick() {
+    shown++; render(true);
+    if (shown >= total) stop();
+    syncButtons();
+  }
+
+  function startTimer() { timer = setInterval(tick, STEP_MS); }
+
+  function togglePlay() {
+    if (timer) { stop(); syncButtons(); return; }                      // pause
+    if (trace && shown < total) { tick(); if (shown < total) startTimer(); syncButtons(); return; } // resume: show the next step now
+    load(cur, true);                                                  // play from the start
+  }
+
+  async function load(i, animate) {
+    stop();
+    cur = i; running = true; trace = null; shown = 0; total = 1;
+    syncButtons(); render(false);
+    try {
+      trace = await run(SCEN[i]);
+      total = trace.checks.length + trace.events.length;
+      if (animate && !reduce) {
+        shown = 0; running = false; render(true);
+        startTimer();
+      } else {
+        shown = total; running = false; render(false);
+      }
+    } catch (err) {
+      running = false; trace = null;
+      showError();
+    }
+    syncButtons();
+  }
+
+  async function suspendNow() {
+    if (!trace || running || suspended) return;
+    stop(); running = true; syncButtons();
+    try {
+      await doSuspend(trace);
+      total = trace.checks.length + trace.events.length;
+      shown = total;
+    } catch (err) {
+      showError();
+    }
+    running = false; syncButtons(); render(false);
+  }
+
+  function showError() {
+    $("banner").innerHTML = '<div class="banner denied"><div class="title">Cannot reach the mock API</div><p>Start the server with <span class="mono">npm start</span> and open this page from <span class="mono">http://localhost:3000</span>.</p></div>';
+  }
+
+  // ---- Rendering ----------------------------------------------------------
+
+  // One API call: who sent it, the real path, and the HTTP status (2xx green, anything else red). Click to open the
+  // route as documented plus the real request and response bodies. opts.requestOnly hides the response;
+  // opts.closed keeps it collapsed whatever the display mode.
+  const pretty = (v) => esc(JSON.stringify(v, null, 2));
+  function callHtml(c, opts) {
+    opts = opts || {};
+    const open = apiMode === "data" && !opts.closed;
+    let body = '<div class="tpl">route  ' + esc(c.method + " " + c.route) + "</div>";
+    if (c.headers) body += '<div class="lbl">Headers</div><pre>' + esc(Object.keys(c.headers).map((k) => k + ": " + c.headers[k]).join("\n")) + "</pre>";
+    if (c.request != null) body += '<div class="lbl">Request</div><pre>' + pretty(c.request) + "</pre>";
+    if (!opts.requestOnly && c.response != null) body += '<div class="lbl">Response</div><pre>' + pretty(c.response) + "</pre>";
+    return '<details class="api"' + (open ? " open" : "") + (opts.closed ? " data-closed" : "") + "><summary>" + (c.who ? '<span class="who">' + esc(c.who) + "</span>" : "") +
+      '<span class="route">' + esc(c.method + " " + c.path) + "</span>" +
+      (c.rpc ? '<span class="rpc">' + esc(c.rpc) + "</span>" : "") +
+      (c.status && !opts.requestOnly ? '<span class="st ' + (c.status < 300 && !c.err ? "ok" : "bad") + '">' + c.status + (c.err ? " · tool error" : "") + "</span>" : "") +
+      "</summary>" + body + "</details>";
+  }
+
+  function render(animate) {
+    Array.prototype.forEach.call($("picker").children, (b, i) => { b.setAttribute("aria-pressed", i === cur ? "true" : "false"); });
+    const sc = SCEN[cur];
+    $("blurb").textContent = sc.blurb;
+    $("proves").innerHTML = "<b>What this shows.</b> " + esc(sc.proves);
+    const callText = (sql) => 'run_query(\n  database: "' + DATABASE + '",\n  sql: "' + sql + '",\n  incident: "' + sc.incident + '"\n)';
+    $("call").textContent = callText(sc.steps[0].sql);
+    // The write cases open the session with a read, then make the call the case is about.
+    $("call2cap").hidden = $("call2").hidden = !sc.keySql;
+    if (sc.keySql) $("call2").textContent = callText(sc.keySql);
+    // The MCP request the tool call becomes, and the connection steps the agent took before its first call.
+    $("toolapi").innerHTML = trace && trace.checkCalls.length ? callHtml(trace.checkCalls[0], { requestOnly: true }) : "";
+    $("connectapi").innerHTML = trace ? '<div class="api cap">Before the first call, the agent connects:</div>' + trace.connect.map((c) => callHtml(c)).join("") : "";
+
+    if (!trace) {
+      $("incident").innerHTML = "<h3>Incident</h3><p class=\"mono\" style=\"margin:0;color:var(--muted)\">" + esc(sc.incident) + "</p>";
+      $("checkapi").innerHTML = "";
+      $("checks").innerHTML = "";
+      $("banner").innerHTML = '<div class="banner idle"><div class="title">Running…</div></div>';
+      $("log").innerHTML = "";
+      $("dbcard").hidden = true;
+      $("audit").innerHTML = "";
+      return;
+    }
+
+    const nChecks = trace.checks.length;
+    const checksShown = Math.min(shown, nChecks);
+    const eventsShown = Math.max(0, shown - nChecks);
+    const done = shown >= total;
+    const lastIdx = eventsShown - 1;
+
+    // Incident, with fields patched by the events revealed so far.
+    const view = Object.assign({}, trace.incident);
+    const changed = {};
+    for (let e = 0; e < eventsShown; e++) {
+      const patch = trace.events[e].patch;
+      if (patch) for (const pk in patch) { view[pk] = patch[pk]; changed[pk] = true; }
+    }
+    const rows = [["Number", "number"], ["Summary", "short_description"], ["State", "state"], ["Priority", "priority"], ["Group", "assignment_group"], ["Assigned to", "assigned_to"], ["CI", "cmdb_ci"]];
+    $("incident").innerHTML = "<h3>Incident</h3>" + callHtml(trace.incidentCall, { closed: true }) + "<dl>" + rows.map((r) => {
+      const cls = (changed[r[1]] ? "changed " : "") + ((r[1] === "number" || r[1] === "cmdb_ci") ? "mono" : "");
+      return "<dt>" + r[0] + "</dt><dd" + (cls ? ' class="' + cls.trim() + '"' : "") + ">" + esc(view[r[1]] || "—") + "</dd>";
+    }).join("") + "</dl>" + notesHtml(trace.events.slice(0, eventsShown).filter((ev) => ev.wn));
+
+    // The mock table: as it was before the write, then as it is once the write line has been revealed.
+    const db = trace.table;
+    $("dbcard").hidden = !db;
+    if (db) $("dbcard").innerHTML = dbHtml(db, trace.writeEvent !== undefined && eventsShown > trace.writeEvent, trace.lastWrite);
+
+    // Checks, as returned by POST /warden/access-requests, plus the ITSM calls Warden made to run them.
+    $("checkapi").innerHTML = checksShown > 0 ? trace.checkCalls.map(callHtml).join("") : "";
+    $("checks").innerHTML = trace.checks.map((c, i) => {
+      const revealed = i < checksShown;
+      const st = revealed ? c.status : "wait";
+      const mark = st === "pass" ? "✓" : st === "fail" ? "✕" : st === "skip" ? "–" : "";
+      const cls = "st-" + st + ((animate && revealed && i === checksShown - 1) ? " reveal" : "");
+      return '<li class="' + cls + '"><span class="dot" aria-hidden="true">' + mark + '</span><div><div class="label">' + esc(c.label) + '</div>' +
+        (revealed ? '<div class="detail">' + esc(c.detail) + "</div>" : "") + "</div></li>";
+    }).join("");
+
+    // Outcome banner.
+    const o = trace.outcome, b = $("banner");
+    const reveal = animate ? " reveal" : "";
+    if (checksShown < nChecks) {
+      b.innerHTML = '<div class="banner idle"><div class="title">Checking…</div></div>';
+    } else if (o.kind === "denied" || done) {
+      b.innerHTML = '<div class="banner ' + o.kind + reveal + '"><div class="title">' + esc(o.title) + "</div>" + (o.code ? '<div class="code">' + esc(o.code) + "</div>" : "") + "<p>" + esc(o.note) + "</p></div>";
+    } else {
+      b.innerHTML = '<div class="banner granted' + reveal + '"><div class="title">Access granted</div><p>Session in progress.</p></div>';
+    }
+
+    // Timeline.
+    $("log").innerHTML = trace.events.slice(0, eventsShown).map((ev, i) => {
+      const tag = '<span class="tag">' + esc(ev.tag || ev.k) + "</span>" + kindPill(ev.kind);
+      let body;
+      if (ev.q) body = tag + '<span class="q">' + esc(ev.q) + "</span>" + (ev.x ? '<div class="res' + (ev.bad ? " bad" : "") + '">' + esc(ev.x) + "</div>" : "");
+      else body = tag + esc(ev.x);
+      body += (ev.calls || []).map(callHtml).join("");
+      return "<li" + (animate && i === lastIdx ? ' class="reveal"' : "") + '><span class="t">' + esc(ev.t) + '</span><span class="txt">' + body + "</span></li>";
+    }).join("") || '<li><span class="t"></span><span class="txt" style="color:var(--muted)">Nothing yet.</span></li>';
+
+    // Audit log as the broker had it at this point.
+    const auditN = eventsShown > 0 ? trace.events[eventsShown - 1].auditN : (checksShown >= nChecks ? trace.checksAudit : 0);
+    const audit = trace.audit.slice(0, auditN);
+    $("audit").innerHTML = audit.length ? audit.map((e) =>
+      '<tr><td class="m">' + esc(hhmmss(e.ts)) + '</td><td class="m">' + esc(e.event) + '</td><td>' + kindPill(e.kind) + '</td><td>' + esc(e.agent || "") + '</td><td class="m">' + esc(e.incident || "") + '</td><td class="d">' + esc(e.detail || "") + "</td></tr>"
+    ).join("") : '<tr><td class="empty" colspan="6">No events yet.</td></tr>';
+  }
+
+  // ---- Helpers for the write cases ----------------------------------------
+
+  // READ and WRITE are marked differently wherever a statement appears.
+  const kindPill = (kind) => kind ? '<span class="kind ' + kind.toLowerCase() + '">' + esc(kind) + "</span>" : "";
+
+  // The incident's work notes, as many as the timeline has revealed so far.
+  function notesHtml(noted) {
+    return '<div class="notes"><h4>Work notes (' + noted.length + ")</h4>" + (noted.length
+      ? noted.map((ev) => '<div class="nt"><div class="nh">' + esc(ev.t) + " · " + esc(ev.author || "Warden") + '</div><div class="wn">' + esc(ev.wn) + "</div></div>").join("")
+      : '<div class="none">None yet.</div>') + "</div>";
+  }
+
+  // Compares the table before and after by id: changed cells show "old → new", removed rows are struck through.
+  function diffRows(before, after) {
+    const left = new Map(after.map((r) => [r.id, r]));
+    const rows = before.map((b) => { const a = left.get(b.id); left.delete(b.id); return a ? { state: "same", before: b, after: a } : { state: "gone", before: b }; });
+    left.forEach((a) => rows.push({ state: "new", after: a }));
+    return rows;
+  }
+
+  function dbHtml(db, showAfter, write) {
+    const cols = Object.keys(db.before[0] || db.after[0] || {});
+    const rows = showAfter ? diffRows(db.before, db.after) : db.before.map((b) => ({ state: "same", before: b, after: b }));
+    const touched = rows.filter((r) => r.state !== "same" || cols.some((c) => r.before[c] !== r.after[c])).length;
+    const caption = !showAfter ? "<b>Before</b> the write"
+      : touched ? "<b>After</b> the write · " + touched + " row(s) changed"
+      : "<b>After</b> the " + (write && !write.allowed ? "refused " : "") + "write · no change";
+    return "<h3>Mock table: " + esc(db.name) + '</h3><p class="dbcap">' + caption + '</p><table class="db"><thead><tr>' + cols.map((c) => "<th>" + esc(c) + "</th>").join("") + "</tr></thead><tbody>" +
+      rows.map((r) => "<tr" + (r.state === "same" ? "" : ' class="' + r.state + '"') + ">" + cols.map((c) => {
+        const was = r.before ? r.before[c] : undefined, now = r.after ? r.after[c] : undefined;
+        if (r.state === "same" && was !== now) return '<td class="changed">' + esc(was) + " → " + esc(now) + "</td>";
+        return "<td>" + esc(r.state === "gone" ? was : now) + "</td>";
+      }).join("") + "</tr>").join("") + "</tbody></table>";
+  }
+
+  // ---- Theme --------------------------------------------------------------
+
+  // Dark is the default (set on <html> so the page never flashes light); the button cycles dark, light, then the OS setting.
+  const THEMES = ["dark", "light", "auto"];
+  let theme = 0;
+  $("theme").addEventListener("click", () => {
+    theme = (theme + 1) % THEMES.length;
+    if (THEMES[theme] === "auto") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", THEMES[theme]);
+    $("theme").textContent = "Theme: " + THEMES[theme];
+  });
+
+  // API display: with data (calls open) -> routes only (calls collapsed) -> hidden.
+  const API_MODES = [["data", "with data"], ["routes", "routes only"], ["hidden", "hidden"]];
+  $("apitoggle").addEventListener("click", () => {
+    apiMode = API_MODES[(API_MODES.findIndex((m) => m[0] === apiMode) + 1) % API_MODES.length][0];
+    document.body.classList.toggle("hide-api", apiMode === "hidden");
+    Array.prototype.forEach.call(document.querySelectorAll("details.api"), (d) => { d.open = apiMode === "data" && !d.hasAttribute("data-closed"); });
+    $("apitoggle").textContent = "API calls: " + API_MODES.find((m) => m[0] === apiMode)[1];
+  });
+
+  buildPicker();
+  $("play").addEventListener("click", togglePlay);
+  $("kill").addEventListener("click", suspendNow);
+  load(0, false);
+})();
+</script>
+</body>
+</html>

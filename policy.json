@@ -1,0 +1,31 @@
+{
+  "agents": [
+    {
+      "agent": "IT Ops Agent",
+      "client_id": "it-ops-agent",
+      "owner": "DB Ops",
+      "assignment_group": "DB Ops",
+      "allowed_databases": [
+        "orders-prod"
+      ],
+      "access": "read",
+      "max_duration_minutes": 30,
+      "allowed_priorities": [
+        "P1",
+        "P2"
+      ],
+      "required_ticket_type": "INC",
+      "write_scopes": {
+        "INC0012349": {
+          "database": "orders-prod",
+          "tables": [
+            "orders"
+          ],
+          "statements": [
+            "UPDATE"
+          ]
+        }
+      }
+    }
+  ]
+}
